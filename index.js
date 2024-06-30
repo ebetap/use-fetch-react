@@ -11,16 +11,22 @@ const useFetch = (initialUrl, initialOptions = {}) => {
     retries = 0,
     retryDelay = 1000,
     cache = false,
+    pollInterval = null,
+    batchSize = 1,
+    onPageChange = null,
+    onBatchedResponse = null,
+    onAuthenticationError = null,
   } = initialOptions;
 
   const [url, setUrl] = useState(initialUrl);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [page, setPage] = useState(1); // State for pagination
 
   const cacheRef = useRef({});
   const cancelRequestRef = useRef(null);
-  const [page, setPage] = useState(1); // State for pagination
+  const batchedRequestsRef = useRef([]);
 
   const fetchData = useCallback(
     async (abortController, retryCount = 0) => {
@@ -42,16 +48,33 @@ const useFetch = (initialUrl, initialOptions = {}) => {
           timeout,
           signal: abortController.signal,
         });
-        const transformedData = transformData(response.data);
-        setData(transformedData);
 
-        if (cache) {
-          cacheRef.current[url] = transformedData;
+        const transformedData = transformData(response.data);
+
+        if (batchSize === 1) {
+          setData(transformedData);
+
+          if (cache) {
+            cacheRef.current[url] = transformedData;
+          }
+        } else {
+          batchedRequestsRef.current.push(transformedData);
+
+          if (batchedRequestsRef.current.length >= batchSize) {
+            const batchedResponse = onBatchedResponse ? onBatchedResponse(batchedRequestsRef.current) : batchedRequestsRef.current;
+            setData(batchedResponse);
+
+            batchedRequestsRef.current = [];
+          }
         }
 
         setError(null);
       } catch (error) {
         if (axios.isAxiosError(error)) {
+          if (error.response?.status === 401 && onAuthenticationError) {
+            onAuthenticationError();
+          }
+
           if (retryCount < retries) {
             setTimeout(() => fetchData(abortController, retryCount + 1), retryDelay * (retryCount + 1));
           } else if (!abortController.signal.aborted) {
@@ -73,7 +96,7 @@ const useFetch = (initialUrl, initialOptions = {}) => {
         }
       }
     },
-    [url, method, headers, body, timeout, transformData, retries, retryDelay, cache]
+    [url, method, headers, body, timeout, transformData, retries, retryDelay, cache, batchSize, onBatchedResponse, onAuthenticationError]
   );
 
   useEffect(() => {
@@ -85,25 +108,40 @@ const useFetch = (initialUrl, initialOptions = {}) => {
     const abortController = new AbortController();
     fetchData(abortController);
 
+    const intervalId = pollInterval ? setInterval(() => fetchData(abortController), pollInterval) : null;
+
     return () => {
       abortController.abort();
       if (cancelRequestRef.current) {
         cancelRequestRef.current.cancel();
       }
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
     };
-  }, [fetchData, url]);
+  }, [fetchData, url, pollInterval]);
+
+  const fetchPage = useCallback((pageNumber) => {
+    const nextPageUrl = `${url}?page=${pageNumber}`;
+    setUrl(nextPageUrl);
+    setPage(pageNumber); // Update local page state
+
+    if (onPageChange) {
+      onPageChange(pageNumber);
+    }
+  }, [url, setUrl, setPage, onPageChange]);
 
   const fetchMore = useCallback(() => {
-    const nextPageUrl = `${url}?page=${page + 1}`;
-    setUrl(nextPageUrl);
-    setPage(page + 1); // Update local page state
-  }, [url, page, setUrl, setPage]);
+    const nextPageNumber = page + 1;
+    fetchPage(nextPageNumber);
+  }, [page, fetchPage]);
 
   return {
     data,
     loading,
     error,
     fetchMore,
+    fetchPage,
   };
 };
 
