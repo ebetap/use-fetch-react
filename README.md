@@ -4,11 +4,8 @@ The `useFetch` hook simplifies data fetching from APIs in React applications. It
 
 ### Installation
 
-Make sure you have Axios installed in your project:
 ```bash
-npm install axios
-# or
-yarn add axios
+npm install use-fetch-react
 ```
 
 ### Usage
@@ -17,7 +14,7 @@ yarn add axios
 
    ```javascript
    import React from 'react';
-   import useFetch from './useFetch'; // Adjust the path as per your project structure
+   import useFetch from 'use-fetch-react'; // Adjust the path as per your project structure
    ```
 
 2. **Initialize the hook with the initial URL and configuration options:**
